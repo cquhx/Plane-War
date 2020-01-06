@@ -4,9 +4,7 @@
 #include "stdafx.h"
 #include <cmath>
 #include <Windows.h>
-#include <vector>
 #include <random>
-#include <algorithm>
 #include "plane.h"
 
 #define BMP_Header_Length 54
@@ -16,17 +14,15 @@
 using namespace std;
 
 GLint tex_enermy, tex_back, tex_plane, tex_bullet, tex_Bullet;
-vector<Plane*>vec;
+vector<Enermy*>vec;
 Plane* plane;
 double stime, etime;
-int score = 0;
 default_random_engine e;
 
 void init();
 
-bool power_of_two(int n) {
-	if (n <= 0)
-		return false;
+inline bool power_of_two(int n) {
+	if (n <= 0) return false;
 	return (n & (n - 1)) == 0;
 }
 
@@ -173,28 +169,20 @@ void texture_colorkey(GLubyte r, GLubyte g, GLubyte b,
 	free(pixels);
 }
 
-void drawenermy() {
-	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.5f);
-	for (auto i : vec) 
-		i->draw(tex_enermy, tex_bullet);
-}
 //Judge if all the enermies are died
 bool checkall() {
 	for (auto& i : vec)
-		if (i->exist && i->leftupy - i->width > -1.00)
-			return true;
-	return false;
+		if (i->exist())return false;
+	return true;
 }
 //Creat new enermy
 void newenermy() {
 	vec.clear();
-	
-	uniform_real_distribution<double> u(-1.00, 0.75);
 	uniform_real_distribution<double> u1(0.75, 1.00);
-
+	uniform_real_distribution<double> u2(-1.00, 0.75);
 	for (int i = 0; i < 10; ++i) {
-		Plane*t = new Plane(u(e), u1(e), 0.25, 1);
+		double u = u1(e), l = u2(e);
+		Enermy *t = new Enermy(u, u - 0.25, l, l + 0.25, tex_enermy, tex_bullet);
 		vec.push_back(t);
 	}
 }
@@ -258,7 +246,7 @@ char* to_char(int t) {
 	}
 	str[i] = '\0';
 	int len = i;
-	for (i -= 1; i >= len / 2; --i)
+	for (i -= 1; i >= len >> 1; --i)
 		swap(str[i], str[len - i - 1]);
 	str = str;
 	return str;
@@ -273,8 +261,8 @@ void showscore() {
 
 	glRasterPos2f(-0.40, 0.90);
 	selectFont(20, DEFAULT_CHARSET, "华文仿宋");
-	char *temp = to_char(score);
-	drawCNString(to_char(score));
+	char *temp = to_char(plane->GetScore());
+	drawCNString(temp);
 	delete temp;
 
 	glRasterPos2f(-0.10, 0.90);
@@ -283,7 +271,7 @@ void showscore() {
 
 	glRasterPos2f(0.40, 0.90);
 	selectFont(20, DEFAULT_CHARSET, "华文仿宋");
-	temp = to_char(plane->life);
+	temp = to_char(plane->GetLife());
 	drawCNString(temp);
 	delete temp;
 
@@ -292,46 +280,21 @@ void showscore() {
 
 //Judge if hit the enermy
 void checkcollide() {
-	double x1 = plane->bulletx - 0.05, x2 = x1 + 0.1;
-	double y1 = plane->bullety - 0.1, y2 = plane->bullety;
-	for (auto& i : vec) {
-		if (!i->exist || i->leftupy - i->width < -1.00)
-			continue;
-		if (y1 <= i->leftupy - i->width || y2 >= i->leftupy ||
-			x1 >= i->leftupx + i->width || x2 <= i->leftupx)
-			continue;
-		i->exist = false;
-		score += 10;
-	}
-	if (!checkall())
-		newenermy();
+	plane->checkattack(vec);
+	if (checkall()) newenermy();
 }
 //Judge if be hit
 void checkcollide1() {
-	double leftx = plane->leftupx, rightx = plane->leftupx + plane->width,
-		upy = plane->leftupy, downy = plane->leftupy - plane->width;
-	for (auto &i : vec) {
-		if (i->bulletx > leftx&&i->bulletx < rightx
-			&&i->bullety<upy&&i->bullety>downy&&i->b_exist) {
-			i->b_exist = false;
-			--plane->life;
-			if (plane->life < 0)
-				plane->life = 0;
-		}
-		if (!i->exist)
-			continue;
-		if (i->leftupy - i->width >= plane->leftupy ||
-			i->leftupx >= plane->leftupx + plane->width ||
-			i->leftupx + i->width <= plane->leftupx ||
-			i->leftupy <= plane->leftupy - i->width)
-			continue;
-		plane->life = 0;
-	}
+	plane->checkcollide(vec);
 }
 //attack the enermy
-void drawline() {
-	plane->attack(tex_Bullet);
+void drawbullet() {
+	plane->attack();
 	checkcollide();
+}
+
+void drawenermy() {
+	for (auto &i : vec)i->draw();
 }
 
 void display() {	
@@ -347,31 +310,35 @@ void display() {
 
 	checkcollide1();
 
-	if (plane->life) {
-		plane->Draw(tex_plane);
-		drawline();
-	}
-	else
-		endgame();
+	plane->draw();
+	if (plane->exist()) drawbullet();
+	else endgame();
 
 	showscore();
 	drawenermy();
 	glutSwapBuffers();
 }
 //Control the plane
-void move(unsigned char c, int x, int y) {
-	double temp = plane->Move(c);
-	if (temp > 0)
-		stime = temp;
-	else if (temp < 0)
-		init();
+void keycontrol(unsigned char c, int x, int y) {
+	double temp = plane->move(c);
+	if (temp > 0) stime = temp;
+	else if (temp < 0) init();
+}
+
+void move(int x, int y) {
+	plane->moveto(double(x) / (glutGet(GLUT_WINDOW_WIDTH) >> 1) - 1.0,
+		1.0 - double(y) / (glutGet(GLUT_WINDOW_HEIGHT) >> 1));
+}
+
+void attack(int button, int state, int x, int y) {
+	if (state == GLUT_LEFT)plane->move(' ');
 }
 
 void idle() {
 	display();
-	for (auto i : vec) {
-		i->b_move();
+	for (auto& i : vec) {
 		i->move();
+		i->attack();
 	}
 }
 
@@ -380,13 +347,11 @@ void init() {
 	glutInitWindowPosition(100, 100);
 	glutInitWindowSize(Width, Height);
 	glutCreateWindow("Plane War");
-
 	tex_back = load_texture("Back.bmp");
 	tex_enermy = load_texture("Yellow.bmp");
 	tex_plane = load_texture("Black.bmp");
 	tex_bullet = load_texture("bullet.bmp");
 	tex_Bullet = load_texture("Bomb.bmp");
-	
     glBindTexture(GL_TEXTURE_2D, tex_plane);
 	texture_colorkey(255, 255, 255, 10);
 	glBindTexture(GL_TEXTURE_2D, tex_enermy);
@@ -396,12 +361,12 @@ void init() {
 	glBindTexture(GL_TEXTURE_2D, tex_Bullet);
 	texture_colorkey(255, 255, 255, 10);
     glEnable(GL_TEXTURE_2D);
-
 	newenermy();
-	plane = new Plane(-0.125, 0.00, 0.25, 10);
-
+	plane = new Plane(-0.50, -0.75, -0.125, 0.125, 10, tex_plane, tex_Bullet);
 	glutDisplayFunc(&display);
-	glutKeyboardFunc(&move);
+	glutKeyboardFunc(&keycontrol);
+	glutPassiveMotionFunc(&move);
+	glutMouseFunc(&attack);
 	glutIdleFunc(&idle);
 	glutMainLoop();
 }
@@ -409,6 +374,7 @@ void init() {
 int main(int argc, char* argv[]) {
 	// GLUT初始化
 	glutInit(&argc, argv);
+	ShowCursor(false);
 	init();
 	return 0;
 }
